@@ -1,11 +1,13 @@
 <?php
 
+use App\Http\Controllers\AdminUserController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\PriceCapController;
 use App\Http\Controllers\ProposalController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\AdminDashboardController;
 use App\Http\Middleware\RedirectAdminToDashboard;
+
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('guest')->group(function () {
@@ -19,6 +21,11 @@ Route::middleware('auth')->group(function () {
     Route::post('/dev/switch-role', [AuthController::class, 'switchRole'])->name('dev.switch-role');
 
     Route::get('/admin/dashboard', [AdminDashboardController::class, 'index'])->name('admin.dashboard');
+
+    Route::get('/admin/users', [AdminUserController::class, 'index'])->name('admin.users.index');
+    Route::post('/admin/users', [AdminUserController::class, 'store'])->name('admin.users.store');
+    Route::put('/admin/users/{user}', [AdminUserController::class, 'update'])->name('admin.users.update');
+    Route::delete('/admin/users/{user}', [AdminUserController::class, 'destroy'])->name('admin.users.destroy');
 
     Route::get('/price-caps', [PriceCapController::class, 'index'])->name('price-caps.index');
     Route::post('/price-caps', [PriceCapController::class, 'store'])->name('price-caps.store');

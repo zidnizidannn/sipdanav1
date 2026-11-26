@@ -19,8 +19,12 @@ class AuthController extends Controller
 
     public function login(Request $request)
     {
+        $request->merge([
+            'username' => strtolower(trim((string) $request->input('username'))),
+        ]);
+
         $credentials = $request->validate([
-            'email'    => ['required', 'email'],
+            'username' => ['required', 'string'],
             'password' => ['required', 'string'],
         ]);
 
@@ -35,8 +39,8 @@ class AuthController extends Controller
         }
 
         return back()
-            ->withErrors(['email' => 'Email atau password tidak sesuai.'])
-            ->onlyInput('email');
+            ->withErrors(['username' => 'Username atau password tidak sesuai.'])
+            ->onlyInput('username');
     }
 
     public function logout(Request $request)

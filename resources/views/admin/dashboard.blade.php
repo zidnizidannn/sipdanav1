@@ -25,10 +25,21 @@
                 </div>
             </div>
 
+            <nav class="flex items-center gap-1">
+                <a href="{{ route('admin.dashboard') }}"
+                class="px-3 py-1.5 rounded-lg text-xs font-semibold transition {{ request()->routeIs('admin.dashboard') ? 'bg-teal-50 text-teal-700 border border-teal-200' : 'text-slate-600 hover:bg-slate-100' }}">
+                    Standar Harga
+                </a>
+                <a href="{{ route('admin.users.index') }}"
+                class="px-3 py-1.5 rounded-lg text-xs font-semibold transition {{ request()->routeIs('admin.users.*') ? 'bg-teal-50 text-teal-700 border border-teal-200' : 'text-slate-600 hover:bg-slate-100' }}">
+                    Kelola Akun
+                </a>
+            </nav>
+
             <div class="flex items-center gap-3">
                 <div class="text-right hidden sm:block">
                     <div class="text-xs font-bold text-slate-800">{{ auth()->user()->name }}</div>
-                    <div class="text-[11px] text-slate-400">{{ auth()->user()->email }}</div>
+                    <div class="text-[11px] text-slate-400">{{ auth()->user()->username }}</div>
                 </div>
                 <form action="{{ route('logout') }}" method="POST">
                     @csrf
