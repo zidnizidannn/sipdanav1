@@ -14,7 +14,7 @@ class PriceCapController extends Controller
     {
         /** @var User $user */
         $user = Auth::user();
-        abort_unless($user->isChecker(), 403, 'Hanya Checker yang dapat mengelola Standar Harga Maksimal.');
+        abort_unless($user->isChecker() || $user->isAdmin(), 403, 'Anda tidak memiliki akses ke Standar Harga Maksimal.');
 
         $priceCaps = PriceCap::orderBy('item_name')->get();
 
@@ -25,7 +25,11 @@ class PriceCapController extends Controller
     {
         /** @var User $user */
         $user = Auth::user();
-        abort_unless($user->isChecker(), 403);
+        abort_unless($user->isAdmin(), 403, 'Hanya Admin yang dapat menambah Standar Harga Maksimal.');
+
+        $request->merge([
+            'max_price' => preg_replace('/\D+/', '', (string) $request->input('max_price')),
+        ]);
 
         $validated = $request->validate([
             'item_name' => ['required', 'string', 'max:150', 'unique:price_caps,item_name'],
@@ -40,16 +44,18 @@ class PriceCapController extends Controller
             'created_by' => $user->id,
         ]);
 
-        return redirect()
-            ->route('price-caps.index')
-            ->with('success', "Standar harga '{$validated['item_name']}' berhasil ditambahkan.");
+        return back()->with('success', "Standar harga '{$validated['item_name']}' berhasil ditambahkan.");
     }
 
     public function update(Request $request, PriceCap $priceCap)
     {
         /** @var User $user */
         $user = Auth::user();
-        abort_unless($user->isChecker(), 403);
+        abort_unless($user->isAdmin(), 403, 'Hanya Admin yang dapat mengubah Standar Harga Maksimal.');
+
+        $request->merge([
+            'max_price' => preg_replace('/\D+/', '', (string) $request->input('max_price')),
+        ]);
 
         $validated = $request->validate([
             'item_name' => ['required', 'string', 'max:150', Rule::unique('price_caps', 'item_name')->ignore($priceCap->id)],
@@ -67,22 +73,18 @@ class PriceCapController extends Controller
             'is_active' => $request->boolean('is_active'),
         ]);
 
-        return redirect()
-            ->route('price-caps.index')
-            ->with('success', "Standar harga '{$priceCap->item_name}' berhasil diperbarui.");
+        return back()->with('success', "Standar harga '{$priceCap->item_name}' berhasil diperbarui.");
     }
 
     public function destroy(PriceCap $priceCap)
     {
         /** @var User $user */
         $user = Auth::user();
-        abort_unless($user->isChecker(), 403);
+        abort_unless($user->isAdmin(), 403, 'Hanya Admin yang dapat menghapus Standar Harga Maksimal.');
 
         $name = $priceCap->item_name;
         $priceCap->delete();
 
-        return redirect()
-            ->route('price-caps.index')
-            ->with('success', "Standar harga '{$name}' berhasil dihapus.");
+        return back()->with('success', "Standar harga '{$name}' berhasil dihapus.");
     }
 }

@@ -52,4 +52,9 @@ class User extends Authenticatable
         return in_array($this->entity_group, ['MAIN_ENTITY', 'SCHOOL'])
             && !($this->role_code === 'YAYASAN' && $this->yayasan_mode === 'FUND_PROVIDER');
     }
+
+    public function isAdmin(): bool
+    {
+        return $this->role_code === 'ADMIN';
+    }
 }
