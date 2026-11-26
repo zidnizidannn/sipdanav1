@@ -188,7 +188,8 @@
                                 $st = $statusBadges[$p->status] ?? ['label' => $p->status, 'cls' => 'bg-slate-100 text-slate-700 border-slate-200', 'dot' => 'bg-slate-400'];
 
                                 $isInspectable = ($user->isChecker() && $p->status === 'WAITING_EXAMINATION')
-                                    || ($user->isApprover() && $p->status === 'WAITING_APPROVAL');
+                                    || ($user->role_code === 'PEMBERI_ANGGARAN' && in_array($p->status, ['WAITING_EXAMINATION', 'WAITING_APPROVAL']))
+                                    || ($user->role_code === 'YAYASAN' && $user->yayasan_mode === 'FUND_PROVIDER' && $p->status === 'WAITING_APPROVAL');
                                 $isDisbursable = $user->isKu() && $p->status === 'WAITING_DISBURSEMENT' && !$p->escalated_to_id;
                                 $isRevisable = $p->user_id === $user->id && $p->status === 'REVISION';
                             @endphp

@@ -90,7 +90,7 @@
         } elseif ($authUser->role_code === 'CHECKER_YAYASAN') {
             $notifItems = $notifQuery->where('recipient_type', 'YAYASAN')->where('status', 'WAITING_EXAMINATION')->get();
         } elseif ($authUser->role_code === 'PEMBERI_ANGGARAN') {
-            $notifItems = $notifQuery->where('recipient_type', 'PEMBERI_ANGGARAN')->where('status', 'WAITING_APPROVAL')->get();
+            $notifItems = $notifQuery->where('recipient_type', 'PEMBERI_ANGGARAN')->whereIn('status', ['WAITING_EXAMINATION', 'WAITING_APPROVAL'])->get();
         } elseif ($authUser->role_code === 'YAYASAN' && $authUser->yayasan_mode === 'FUND_PROVIDER') {
             $notifItems = $notifQuery->where('recipient_type', 'YAYASAN')->where('status', 'WAITING_APPROVAL')->get();
         } elseif ($authUser->isKu()) {
@@ -424,12 +424,17 @@
                             </form>
                         @endif
 
+                        <button type="button" id="enableBrowserNotifBtn" onclick="requestBrowserNotifPermission()"
+                                class="hidden text-[11px] font-semibold text-teal-600 hover:underline">
+                            Aktifkan Popup Browser
+                        </button>
+
                         {{-- Notification Bell --}}
                         <div class="relative" id="notifDropdownWrapper">
                             <button type="button" onclick="toggleNotifDropdown()" class="w-9 h-9 rounded-lg border border-slate-200 hover:bg-slate-50 flex items-center justify-center text-slate-600 relative transition">
                                 <i class="fa-regular fa-bell text-sm"></i>
                                 @if($notifItems->count() > 0)
-                                    <span class="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[10px] font-bold flex items-center justify-center">
+                                    <span id="notifBadge" class="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[10px] font-bold flex items-center justify-center">
                                         {{ $notifItems->count() }}
                                     </span>
                                 @endif
@@ -442,10 +447,19 @@
                                 </div>
                                 <div class="max-h-80 overflow-y-auto divide-y divide-slate-100">
                                     @forelse($notifItems as $nf)
-                                        @php $nfTotal = $nf->items->sum(fn($i) => $i->qty * $i->unit_price); @endphp
-                                        <a href="{{ route('proposals.show', $nf) }}" class="block p-3.5 hover:bg-slate-50 transition">
-                                            <div class="text-xs font-bold text-slate-800">#{{ $nf->code }} — {{ $nf->user->name }}</div>
-                                            <div class="text-[11px] text-slate-500 line-clamp-1 mt-0.5">{{ $nf->title }} (Rp {{ number_format($nfTotal, 0, ',', '.') }})</div>
+                                        @php
+                                            $nfTotal = $nf->items->sum(fn($i) => $i->qty * $i->unit_price);
+                                            $nfKey = $nf->id . ':' . optional($nf->updated_at)->timestamp;
+                                        @endphp
+                                        <a href="{{ route('proposals.show', $nf) }}"
+                                        data-notif-key="{{ $nfKey }}"
+                                        onclick="markNotifRead('{{ $nfKey }}')"
+                                        class="notif-item flex items-start gap-2.5 p-3.5 hover:bg-slate-50 transition">
+                                            <span class="notif-dot mt-1.5 w-2 h-2 rounded-full bg-teal-600 shrink-0"></span>
+                                            <div class="min-w-0 flex-1">
+                                                <div class="text-xs font-bold text-slate-800">#{{ $nf->code }} — {{ $nf->user->name }}</div>
+                                                <div class="text-[11px] text-slate-500 line-clamp-1 mt-0.5">{{ $nf->title }} (Rp {{ number_format($nfTotal, 0, ',', '.') }})</div>
+                                            </div>
                                         </a>
                                     @empty
                                         <div class="p-6 text-center text-xs text-slate-400">
@@ -499,7 +513,71 @@
         </div>
     </div>
 
+    @php
+        $notifStorageKey = $authUser
+            ? 'sipdana_notif_read_' . $authUser->id . '_' . ($authUser->yayasan_mode ?? 'default')
+            : '';
+        $allNotifKeys = $notifItems
+            ->map(fn($n) => $n->id . ':' . optional($n->updated_at)->timestamp)
+            ->values()
+            ->all();
+    @endphp
+
     <script>
+        const NOTIF_STORAGE_KEY = @json($notifStorageKey);
+        const ALL_NOTIF_KEYS = @json($allNotifKeys);
+
+        function getReadNotifs() {
+            if (!NOTIF_STORAGE_KEY) return [];
+            try {
+                const parsed = JSON.parse(localStorage.getItem(NOTIF_STORAGE_KEY) || '[]');
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (e) {
+                return [];
+            }
+        }
+
+        function saveReadNotifs(keys) {
+            if (!NOTIF_STORAGE_KEY) return;
+            const activeOnly = keys.filter(k => ALL_NOTIF_KEYS.includes(k));
+            localStorage.setItem(NOTIF_STORAGE_KEY, JSON.stringify([...new Set(activeOnly)]));
+        }
+
+        function syncNotifUI() {
+            const readKeys = getReadNotifs();
+            saveReadNotifs(readKeys);
+
+            const unreadCount = ALL_NOTIF_KEYS.filter(k => !readKeys.includes(k)).length;
+            const badge = document.getElementById('notifBadge');
+
+            if (badge) {
+                if (unreadCount > 0) {
+                    badge.textContent = unreadCount;
+                    badge.classList.remove('hidden');
+                } else {
+                    badge.classList.add('hidden');
+                }
+            }
+
+            document.querySelectorAll('.notif-item').forEach(el => {
+                const key = el.dataset.notifKey;
+                const dot = el.querySelector('.notif-dot');
+                const isRead = readKeys.includes(key);
+
+                if (dot) dot.classList.toggle('opacity-0', isRead);
+                el.classList.toggle('bg-teal-50/30', !isRead);
+            });
+        }
+
+        function markNotifRead(key) {
+            const readKeys = getReadNotifs();
+            if (!readKeys.includes(key)) {
+                readKeys.push(key);
+                saveReadNotifs(readKeys);
+                syncNotifUI();
+            }
+        }
+
         function openRoleModal() {
             const m = document.getElementById('roleModal');
             if (m) m.classList.remove('hidden');
@@ -522,12 +600,141 @@
         function toggleNotifDropdown() {
             document.getElementById('notifDropdownPanel').classList.toggle('hidden');
         }
+
+        document.addEventListener('DOMContentLoaded', syncNotifUI);
+
         document.addEventListener('click', (e) => {
             const wrapper = document.getElementById('notifDropdownWrapper');
             const panel = document.getElementById('notifDropdownPanel');
             if (wrapper && panel && !wrapper.contains(e.target)) {
                 panel.classList.add('hidden');
             }
+        });
+
+        const READ_STORAGE_KEY     = 'sipdana_read_notifs_{{ auth()->id() }}';
+        const POPPED_STORAGE_KEY   = 'sipdana_popped_notifs_{{ auth()->id() }}';
+        const POLL_URL             = "{{ route('notifications.poll') }}";
+
+        function getStoredSet(key) {
+            try {
+                return new Set(JSON.parse(localStorage.getItem(key) || '[]'));
+            } catch {
+                return new Set();
+            }
+        }
+
+        function saveStoredSet(key, set) {
+            // Simpan maksimal 100 key terakhir agar localStorage tidak membengkak
+            const arr = Array.from(set).slice(-100);
+            localStorage.setItem(key, JSON.stringify(arr));
+        }
+
+        // Tampilkan tombol izin jika browser mendukung & belum diizinkan
+        function updateNotifPermissionButton() {
+            const btn = document.getElementById('enableBrowserNotifBtn');
+            if (!btn || !('Notification' in window)) return;
+            btn.classList.toggle('hidden', Notification.permission === 'granted');
+        }
+
+        async function requestBrowserNotifPermission() {
+            if (!('Notification' in window)) {
+                alert('Browser ini tidak mendukung notifikasi desktop.');
+                return;
+            }
+            const permission = await Notification.requestPermission();
+            updateNotifPermissionButton();
+
+            if (permission === 'granted') {
+                new Notification('SIPDANA', {
+                    body: 'Notifikasi browser berhasil diaktifkan.',
+                });
+            }
+        }
+
+        function showBrowserPopup(item) {
+            if (!('Notification' in window) || Notification.permission !== 'granted') return;
+
+            const notif = new Notification(item.title, {
+                body: item.message,
+                tag: item.key, // Mencegah duplikat popup dengan key sama
+            });
+
+            notif.onclick = function () {
+                window.focus();
+                markNotifAsRead(item.key);
+                window.location.href = item.url;
+                notif.close();
+            };
+        }
+
+        function markNotifAsRead(itemKey) {
+            const readSet = getStoredSet(READ_STORAGE_KEY);
+            readSet.add(itemKey);
+            saveStoredSet(READ_STORAGE_KEY, readSet);
+        }
+
+        async function pollNotifications(isFirstLoad = false) {
+            try {
+                const res = await fetch(POLL_URL, {
+                    headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+                });
+                if (!res.ok) return;
+
+                const { items } = await res.json();
+                const readSet   = getStoredSet(READ_STORAGE_KEY);
+                const poppedSet = getStoredSet(POPPED_STORAGE_KEY);
+
+                // Update angka badge lonceng (sesuaikan ID elemen badge Anda)
+                const unreadCount = items.filter(i => !readSet.has(i.key)).length;
+                const badge = document.getElementById('notifBadge');
+                if (badge) {
+                    badge.textContent = unreadCount;
+                    badge.classList.toggle('hidden', unreadCount === 0);
+                }
+
+                // Render ulang isi daftar dropdown (sesuaikan ID container list Anda)
+                const listEl = document.getElementById('notifList');
+                if (listEl) {
+                    if (items.length === 0) {
+                        listEl.innerHTML = '<div class="px-4 py-6 text-center text-xs text-slate-400">Belum ada notifikasi.</div>';
+                    } else {
+                        listEl.innerHTML = items.map(item => {
+                            const isRead = readSet.has(item.key);
+                            return `
+                                <a href="${item.url}"
+                                onclick="markNotifAsRead('${item.key}')"
+                                class="block px-4 py-3 hover:bg-slate-50 border-b border-slate-100 transition ${isRead ? 'opacity-60' : 'bg-teal-50/40'}">
+                                    <div class="flex items-start justify-between gap-2">
+                                        <div class="text-xs font-semibold text-slate-800">${item.title}</div>
+                                        ${isRead ? '' : '<span class="w-2 h-2 mt-1 rounded-full bg-teal-600 shrink-0"></span>'}
+                                    </div>
+                                    <div class="text-[11px] text-slate-600 mt-0.5">${item.message}</div>
+                                    <div class="text-[10px] text-slate-400 mt-1">${item.time}</div>
+                                </a>
+                            `;
+                        }).join('');
+                    }
+                }
+
+                // Munculkan popup browser hanya untuk notifikasi baru yang belum pernah di-popup
+                items.forEach(item => {
+                    if (!poppedSet.has(item.key)) {
+                        if (!isFirstLoad && !readSet.has(item.key)) {
+                            showBrowserPopup(item);
+                        }
+                        poppedSet.add(item.key);
+                    }
+                });
+                saveStoredSet(POPPED_STORAGE_KEY, poppedSet);
+            } catch (err) {
+                console.warn('Gagal mengambil notifikasi:', err);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            updateNotifPermissionButton();
+            pollNotifications(true);                 // Load awal tanpa spam popup lama
+            setInterval(() => pollNotifications(false), 15000); // Cek tiap 15 detik
         });
     </script>
 

@@ -293,12 +293,94 @@ class ProposalController extends Controller
         $user = Auth::user();
         abort_unless($this->canApprove($user, $proposal), 403, 'Anda tidak berhak menyetujui pengajuan ini.');
 
-        if ($proposal->status !== Proposal::STATUS_WAITING_APPROVAL) {
-            return back()->with('error', 'Pengajuan ini tidak berada pada tahap Menunggu Persetujuan.');
+        $allowedStatuses = $user->role_code === 'PEMBERI_ANGGARAN'
+            ? [Proposal::STATUS_WAITING_EXAMINATION, Proposal::STATUS_WAITING_APPROVAL]
+            : [Proposal::STATUS_WAITING_APPROVAL];
+
+        if (!in_array($proposal->status, $allowedStatuses, true)) {
+            return back()->with('error', 'Pengajuan ini tidak berada pada tahap yang dapat diproses.');
         }
 
         $note = trim((string) $request->input('approval_note', ''));
+        $wasBypassingChecker = $proposal->status === Proposal::STATUS_WAITING_EXAMINATION;
 
+        // Jika dikirim beserta checklist item (dari Pemberi Anggaran)
+        if ($request->has('items')) {
+            $proposal->load('items');
+            $submittedItems = $request->input('items', []);
+            $errors = [];
+            $hasUnchecked = false;
+            $revisionSummary = [];
+
+            foreach ($proposal->items as $item) {
+                $input = $submittedItems[$item->id] ?? [];
+                $isChecked = filter_var($input['is_checked'] ?? false, FILTER_VALIDATE_BOOLEAN);
+                $revNote = trim((string) ($input['revision_note'] ?? ''));
+
+                if (!$isChecked) {
+                    $hasUnchecked = true;
+                    if ($revNote === '') {
+                        $errors["items.{$item->id}.revision_note"] = "Catatan revisi wajib diisi untuk item '{$item->name}' yang tidak dicentang.";
+                    } else {
+                        $revisionSummary[] = "{$item->name}: {$revNote}";
+                    }
+                }
+            }
+
+            if (!empty($errors)) {
+                throw ValidationException::withMessages($errors);
+            }
+
+            DB::transaction(function () use ($proposal, $submittedItems, $hasUnchecked, $revisionSummary, $user, $note, $wasBypassingChecker) {
+                foreach ($proposal->items as $item) {
+                    $input = $submittedItems[$item->id] ?? [];
+                    $isChecked = filter_var($input['is_checked'] ?? false, FILTER_VALIDATE_BOOLEAN);
+                    $revNote = $isChecked ? null : trim((string) ($input['revision_note'] ?? ''));
+
+                    $item->update([
+                        'is_checked'    => $isChecked,
+                        'revision_note' => $revNote,
+                    ]);
+                }
+
+                if ($hasUnchecked) {
+                    $proposal->update(['status' => Proposal::STATUS_REVISION]);
+                    ProposalHistory::create([
+                        'proposal_id' => $proposal->id,
+                        'actor_id'    => $user->id,
+                        'actor_label' => $user->name,
+                        'action'      => 'Dikembalikan untuk Revisi',
+                        'note'        => implode(' | ', $revisionSummary),
+                    ]);
+                } else {
+                    $proposal->update(['status' => Proposal::STATUS_WAITING_DISBURSEMENT]);
+
+                    $actionLabel = $wasBypassingChecker
+                        ? 'Disetujui Final / ACC Langsung'
+                        : 'Disetujui (ACC)';
+
+                    $defaultNote = $wasBypassingChecker
+                        ? 'Diperiksa dan disetujui langsung oleh Pemberi Anggaran (tanpa menunggu Checker), langsung masuk proses pencairan KU.'
+                        : 'Pengajuan disetujui dan diteruskan ke antrean pencairan KU.';
+
+                    ProposalHistory::create([
+                        'proposal_id' => $proposal->id,
+                        'actor_id'    => $user->id,
+                        'actor_label' => $user->name,
+                        'action'      => $actionLabel,
+                        'note'        => $note !== '' ? $note : $defaultNote,
+                    ]);
+                }
+            });
+
+            $message = $hasUnchecked
+                ? 'Pengajuan dikembalikan ke pengaju untuk direvisi.'
+                : 'Pengajuan disetujui (ACC) dan langsung masuk proses pencairan KU.';
+
+            return redirect()->route('proposals.show', $proposal)->with('success', $message);
+        }
+
+        // Alur ACC standar tanpa checklist (misal dari Yayasan)
         DB::transaction(function () use ($proposal, $user, $note) {
             $proposal->update([
                 'status' => Proposal::STATUS_WAITING_DISBURSEMENT,
@@ -315,7 +397,7 @@ class ProposalController extends Controller
 
         return redirect()
             ->route('proposals.show', $proposal)
-            ->with('success', 'Pengajuan disetujui dan masuk antrean Menunggu Pencairan.');
+            ->with('success', 'Pengajuan disetujui dan masuk antrean Menunggu Pencairan KU.');
     }
 
     /**

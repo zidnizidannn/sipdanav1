@@ -13,16 +13,19 @@
             ($user->role_code === 'CHECKER_YAYASAN' && $proposal->recipient_type === 'YAYASAN')
         );
 
-        $canApprove = $proposal->status === 'WAITING_APPROVAL' && (
-            ($user->role_code === 'PEMBERI_ANGGARAN' && $proposal->recipient_type === 'PEMBERI_ANGGARAN') ||
-            ($user->role_code === 'YAYASAN' && $user->yayasan_mode === 'FUND_PROVIDER' && $proposal->recipient_type === 'YAYASAN')
-        );
+        // Pemberi Anggaran bisa langsung cek + ACC (ke KU) baik dari WAITING_EXAMINATION maupun WAITING_APPROVAL
+        $isDirectApprover = $user->role_code === 'PEMBERI_ANGGARAN'
+            && $proposal->recipient_type === 'PEMBERI_ANGGARAN'
+            && in_array($proposal->status, ['WAITING_EXAMINATION', 'WAITING_APPROVAL']);
 
-        $canEscalate = $canApprove
+        $canChecklist = $canExamine || $isDirectApprover;
+
+        $canYayasanApprove = $proposal->status === 'WAITING_APPROVAL'
             && $user->role_code === 'YAYASAN'
             && $user->yayasan_mode === 'FUND_PROVIDER'
-            && $proposal->recipient_type === 'YAYASAN'
-            && is_null($proposal->escalated_to_id);
+            && $proposal->recipient_type === 'YAYASAN';
+
+        $canEscalate = $canYayasanApprove && is_null($proposal->escalated_to_id);
 
         $canDisburse = $user->isKu()
             && $proposal->status === 'WAITING_DISBURSEMENT'
@@ -195,13 +198,13 @@
                         <div>
                             <h3 class="font-bold text-xs text-slate-800">Rincian Item &amp; Checklist Pemeriksaan</h3>
                             <p class="text-[11px] text-slate-500 mt-0.5">
-                                {{ $canExamine
+                                {{ $canChecklist
                                     ? 'Hapus centang (uncheck) pada item yang perlu direvisi dan tuliskan catatannya.'
                                     : 'Status pemeriksaan per item anggaran.' }}
                             </p>
                         </div>
 
-                        @if($canExamine)
+                        @if($canChecklist)
                             <div class="flex items-center gap-1.5">
                                 <button type="button" onclick="setAllChecks(true)" class="px-2.5 py-1 rounded border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 text-[11px] font-semibold transition">
                                     Centang Semua
@@ -213,11 +216,19 @@
                         @endif
                     </div>
 
-                    @if($canExamine)
-                        <form id="examineForm" action="{{ route('proposals.examine', $proposal) }}" method="POST">
+                    @if($canChecklist)
+                        <form id="examineForm" action="{{ $isDirectApprover ? route('proposals.approve', $proposal) : route('proposals.examine', $proposal) }}" method="POST">
                             @csrf
                             <div class="px-5 py-2 bg-slate-900 text-slate-200 text-[11px] font-medium flex items-center justify-between">
-                                <span>Pemeriksaan Tahap 1: {{ $user->name }}</span>
+                                <span>
+                                    @if($isDirectApprover)
+                                        {{ $proposal->status === 'WAITING_EXAMINATION'
+                                            ? 'Pemeriksaan & ACC Langsung: Pemberi Anggaran (Langsung ke KU)'
+                                            : 'Pemeriksaan & Persetujuan Akhir: Pemberi Anggaran' }}
+                                    @else
+                                        Pemeriksaan Tahap 1: {{ $user->name }}
+                                    @endif
+                                </span>
                                 <span id="checkedCounter">Disetujui: {{ $proposal->items->count() }} / {{ $proposal->items->count() }}</span>
                             </div>
 
@@ -251,7 +262,7 @@
                                                             </span>
                                                             @if($item->priceCap)
                                                                 <span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-teal-50 text-teal-800 border border-teal-200">
-                                                                    Standar Maks Rp {{ number_format($item->priceCap->max_price, 0, ',', '.') }}
+                                                                    Standar Fix Rp {{ number_format($item->priceCap->max_price, 0, ',', '.') }}
                                                                 </span>
                                                             @endif
                                                         </div>
@@ -277,16 +288,24 @@
                                 @endforeach
                             </div>
 
-                            {{-- Panel Submit Checker --}}
+                            {{-- Panel Submit Checker / Pemberi Anggaran --}}
                             <div class="p-5 bg-slate-50 border-t border-slate-200 space-y-3.5">
                                 <div id="examineHintBox" class="p-3 rounded-lg border text-xs font-medium bg-emerald-50 border-emerald-200 text-emerald-900">
-                                    Seluruh item telah dicentang. Pengajuan siap diteruskan ke tahap Persetujuan.
+                                    Seluruh item telah dicentang.
                                 </div>
+
+                                @if($isDirectApprover)
+                                    <div id="approvalNoteWrap">
+                                        <input type="text" name="approval_note" value="{{ old('approval_note') }}"
+                                               placeholder="Catatan persetujuan untuk KU / Pengaju (opsional)..."
+                                               class="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs focus:outline-none focus:border-emerald-600">
+                                    </div>
+                                @endif
 
                                 <div class="flex flex-wrap items-center justify-end gap-2">
                                     <button type="submit" id="btnExamineSubmit"
                                             class="px-5 py-2 rounded-lg text-xs font-semibold transition bg-teal-600 hover:bg-teal-700 text-white">
-                                        Setujui &amp; Teruskan ke {{ $proposal->recipient_type === 'YAYASAN' ? 'Yayasan' : 'Pemberi Anggaran' }}
+                                        Proses
                                     </button>
                                 </div>
                             </div>
@@ -316,7 +335,7 @@
                                                         @endif
                                                         @if($item->priceCap)
                                                             <span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-teal-50 text-teal-800 border border-teal-200">
-                                                                Standar Maks Rp {{ number_format($item->priceCap->max_price, 0, ',', '.') }}
+                                                                Standar Fix Rp {{ number_format($item->priceCap->max_price, 0, ',', '.') }}
                                                             </span>
                                                         @endif
                                                     </div>
@@ -340,15 +359,14 @@
                             @endforeach
                         </div>
 
-                        {{-- Panel Persetujuan Akhir (Pemberi Anggaran / Yayasan Mode Pemberi Dana) --}}
-                        @if($canApprove)
+                        {{-- Panel Persetujuan Akhir Khusus Yayasan (Mode Pemberi Dana) --}}
+                        @if($canYayasanApprove)
                             <div class="p-5 bg-slate-50 border-t border-slate-200 space-y-4">
                                 <div class="p-3 rounded-lg border bg-emerald-50 border-emerald-200 text-emerald-900 text-xs font-medium">
-                                    Seluruh item telah lolos tahap Checker. Anda dapat memberikan persetujuan akhir (ACC) untuk diteruskan ke antrean pencairan KU{{ $canEscalate ? ', atau mengeskalasi pengajuan sekolah ini ke Pemberi Anggaran Pusat' : '' }}.
+                                    Seluruh item telah lolos tahap Checker Yayasan. Anda dapat memberikan persetujuan akhir (ACC) untuk diteruskan ke antrean pencairan KU{{ $canEscalate ? ', atau mengeskalasi pengajuan sekolah ini ke Pemberi Anggaran Pusat' : '' }}.
                                 </div>
 
                                 <div class="grid grid-cols-1 {{ $canEscalate ? 'md:grid-cols-2' : '' }} gap-3">
-                                    {{-- Form ACC Final --}}
                                     <form action="{{ route('proposals.approve', $proposal) }}" method="POST"
                                           class="p-3.5 rounded-xl bg-white border border-slate-200 space-y-2.5">
                                         @csrf
@@ -361,7 +379,6 @@
                                         </button>
                                     </form>
 
-                                    {{-- Form Eskalasi Khusus Yayasan --}}
                                     @if($canEscalate)
                                         <form action="{{ route('proposals.escalate', $proposal) }}" method="POST"
                                               class="p-3.5 rounded-xl bg-white border border-slate-200 space-y-2.5">
@@ -440,8 +457,9 @@
 @endsection
 
 @push('scripts')
-@if($canExamine)
+@if($canChecklist)
 <script>
+    const isDirectApprover = @json($isDirectApprover);
     const recipientLabel = @json($proposal->recipient_type === 'YAYASAN' ? 'Yayasan' : 'Pemberi Anggaran');
 
     function setAllChecks(checked) {
@@ -487,20 +505,32 @@
 
         const hintBox = document.getElementById('examineHintBox');
         const btnSubmit = document.getElementById('btnExamineSubmit');
+        const approvalNoteWrap = document.getElementById('approvalNoteWrap');
 
         if (checkedCount === total) {
+            if (approvalNoteWrap) approvalNoteWrap.classList.remove('hidden');
             hintBox.className = 'p-3 rounded-lg border text-xs font-medium bg-emerald-50 border-emerald-200 text-emerald-900';
-            hintBox.textContent = `Seluruh ${total} item telah dicentang. Pengajuan siap diteruskan ke ${recipientLabel}.`;
-            btnSubmit.disabled = false;
-            btnSubmit.className = 'px-5 py-2 rounded-lg text-xs font-semibold transition bg-teal-600 hover:bg-teal-700 text-white cursor-pointer';
-            btnSubmit.textContent = `Setujui & Teruskan ke ${recipientLabel}`;
+
+            if (isDirectApprover) {
+                hintBox.textContent = `Seluruh ${total} item telah dicentang. Klik tombol di bawah untuk langsung ACC dan meneruskan ke proses pencairan KU.`;
+                btnSubmit.disabled = false;
+                btnSubmit.className = 'px-5 py-2 rounded-lg text-xs font-semibold transition bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer';
+                btnSubmit.textContent = 'Setujui Final (ACC) & Proses Pencairan KU';
+            } else {
+                hintBox.textContent = `Seluruh ${total} item telah dicentang. Pengajuan siap diteruskan ke ${recipientLabel}.`;
+                btnSubmit.disabled = false;
+                btnSubmit.className = 'px-5 py-2 rounded-lg text-xs font-semibold transition bg-teal-600 hover:bg-teal-700 text-white cursor-pointer';
+                btnSubmit.textContent = `Setujui & Teruskan ke ${recipientLabel}`;
+            }
         } else if (missingNotes > 0) {
+            if (approvalNoteWrap) approvalNoteWrap.classList.add('hidden');
             hintBox.className = 'p-3 rounded-lg border text-xs font-medium bg-rose-50 border-rose-200 text-rose-900';
             hintBox.textContent = `Mohon isi catatan revisi pada ${missingNotes} item yang tidak dicentang sebelum mengembalikan pengajuan.`;
             btnSubmit.disabled = true;
             btnSubmit.className = 'px-5 py-2 rounded-lg text-xs font-semibold transition bg-slate-200 text-slate-400 cursor-not-allowed';
             btnSubmit.textContent = 'Kembalikan ke Pengaju (Revisi)';
         } else {
+            if (approvalNoteWrap) approvalNoteWrap.classList.add('hidden');
             const uncheckedTotal = total - checkedCount;
             hintBox.className = 'p-3 rounded-lg border text-xs font-medium bg-amber-50 border-amber-200 text-amber-900';
             hintBox.textContent = `Terdapat ${uncheckedTotal} item perlu revisi dan catatan sudah lengkap. Klik tombol di bawah untuk mengembalikan ke pengaju.`;

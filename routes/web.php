@@ -3,6 +3,7 @@
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\PriceCapController;
 use App\Http\Controllers\ProposalController;
+use App\Http\Controllers\NotificationController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', fn () => redirect()->route('proposals.index'));
@@ -16,6 +17,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
     Route::post('/yayasan/toggle-mode', [AuthController::class, 'toggleYayasanMode'])->name('yayasan.toggle-mode');
     Route::post('/dev/switch-role', [AuthController::class, 'switchRole'])->name('dev.switch-role');
+    Route::get('/notifications/poll', [NotificationController::class, 'poll'])->name('notifications.poll');
 
     Route::get('/proposals', [ProposalController::class, 'index'])->name('proposals.index');
     Route::get('/proposals/create', [ProposalController::class, 'create'])->name('proposals.create');
